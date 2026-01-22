@@ -53,10 +53,10 @@ function copyToClipboard(text, buttonElement, successMessage = 'Copiado!', origi
                     buttonElement.disabled = false;
                 }, 2000);
             } else {
-                 outputElement.textContent += `\n\n(${successMessage})`;
+                 outputElement.textContent += `\n(${successMessage})`;
                  setTimeout(() => {
-                    if (outputElement.textContent.endsWith(`\n\n(${successMessage})`)) {
-                        outputElement.textContent = outputElement.textContent.slice(0, -`\n\n(${successMessage})`.length);
+                    if (outputElement.textContent.endsWith(`\n(${successMessage})`)) {
+                        outputElement.textContent = outputElement.textContent.slice(0, -`\n(${successMessage})`.length);
                     }
                  }, 2000);
             }
@@ -71,16 +71,16 @@ function extractDataFromText(textBlock) {
     const lines = textBlock.split('\n');
     let name = null;
     let cpf = null;
-    let dob = null;
     let yearOfBirth = null;
+    let dobString = null;
 
-    // More robust regex patterns.
+    // Regex patterns using 'i' flag for case-insensitivity.
     // They match the keyword at the start of the line, optionally preceded by 
-    // any characters that are not letters or numbers (e.g., emojis, bullets, etc.) and whitespace.
+    // non-alphanumeric characters (like '•', '*', '-', emojis) and/or whitespace.
     // The keyword must be followed by a colon.
-    const namePattern = /^(?:[^\p{L}\p{N}]*\s*)?nome\s*:/iu; 
-    const cpfPattern = /^(?:[^\p{L}\p{N}]*\s*)?cpf\s*:/iu;    
-    const dobPattern = /^(?:[^\p{L}\p{N}]*\s*)?(?:data\s*(?:de\s*)?)?nascimento\s*:/iu;
+    const namePattern = /^(?:[^a-z0-9\s]*\s*)?nome\s*:/i; 
+    const cpfPattern = /^(?:[^a-z0-9\s]*\s*)?cpf\s*:/i;    
+    const dobPattern = /^(?:[^a-z0-9\s]*\s*)?(?:data\s*(?:de\s*)?)?nascimento\s*:/i;
 
     for (const rawLine of lines) {
         const currentLine = trim(rawLine);
@@ -89,38 +89,42 @@ function extractDataFromText(textBlock) {
         if (!name) {
             const nameMatch = currentLine.match(namePattern);
             if (nameMatch) {
-                const valuePart = trim(currentLine.substring(nameMatch[0].length));
+                const valuePart = trim(currentLine.substring(nameMatch.index + nameMatch[0].length));
                 if (valuePart) name = valuePart;
-                continue; // Move to next line once matched
             }
         }
 
         if (!cpf) {
             const cpfMatch = currentLine.match(cpfPattern);
             if (cpfMatch) {
-                const valuePart = trim(currentLine.substring(cpfMatch[0].length));
+                const valuePart = trim(currentLine.substring(cpfMatch.index + cpfMatch[0].length));
                 const cpfValue = valuePart.replace(/\D/g, ''); // Remove non-digits
                 if (cpfValue && cpfValue.length >= 11) cpf = cpfValue.slice(0, 11); // Take first 11 digits
-                continue; // Move to next line once matched
             }
         }
 
-        if (!dob) {
+        if (!yearOfBirth) {
             const dobMatch = currentLine.match(dobPattern);
             if (dobMatch) {
-                const valuePart = trim(currentLine.substring(dobMatch[0].length));
+                const valuePart = trim(currentLine.substring(dobMatch.index + dobMatch[0].length));
                 // Regex to match DD/MM/YYYY. Allows for other text after the date string.
-                const dateParts = valuePart.match(/^(\d{1,2}\/\d{1,2}\/\d{4})/); 
+                const dateParts = valuePart.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); 
                 if (dateParts) {
-                    dob = dateParts[1]; // The full DD/MM/YYYY string
-                    yearOfBirth = parseInt(dob.split('/')[2], 10);
+                    yearOfBirth = parseInt(dateParts[3], 10);
+                    dobString = `${dateParts[1].padStart(2, '0')}/${dateParts[2].padStart(2, '0')}/${dateParts[3]}`;
                 }
-                continue; // Move to next line once matched
             }
         }
     }
-    if (name && cpf && yearOfBirth) return { name, cpf, dob, yearOfBirth };
-    return null;
+
+    const result = {};
+    if (name) result.name = name;
+    if (cpf) result.cpf = cpf;
+    if (yearOfBirth) result.yearOfBirth = yearOfBirth;
+    if (dobString) result.dobString = dobString;
+
+    // Return an object with found fields, or an empty object if nothing was found.
+    return result;
 }
 
 function promptForPassword(actionName) {
@@ -272,8 +276,8 @@ function updateUIForActiveBank() {
 }
 
 // --- UI ELEMENT CREATION ---
-function updateProfileCircleDisplay(circleElement, bankId, profileName) {
-    circleElement.innerHTML = `
+function updateProfileCircleDisplay(rectElement, bankId, profileName) {
+    rectElement.innerHTML = `
         <span class="profile-bank-id-display">${bankId}</span>
         <span class="profile-name-display">${profileName}</span>
     `;
@@ -281,31 +285,36 @@ function updateProfileCircleDisplay(circleElement, bankId, profileName) {
 
 function createProfileCircles() {
     profileCirclesContainer.innerHTML = ''; 
+    // Ensure container has a layout class; default to desktop-mode if not set
+    if (!profileCirclesContainer.classList.contains('desktop-mode') && !profileCirclesContainer.classList.contains('mobile-mode')) {
+        profileCirclesContainer.classList.add('desktop-mode');
+    }
+
     const bankKeys = Object.keys(appData.databases).sort((a, b) => parseInt(a.split('-')[1]) - parseInt(b.split('-')[1]));
 
     bankKeys.forEach(bankKey => {
         const bankNum = bankKey.split('-')[1];
         const profileKey = `P-${bankNum}`;
-        const circle = document.createElement('div');
-        circle.className = 'profile-circle';
-        circle.dataset.profileId = profileKey;
-        circle.dataset.bankId = bankKey;
+        const rect = document.createElement('div');
+        rect.className = 'profile-rect';
+        rect.dataset.profileId = profileKey;
+        rect.dataset.bankId = bankKey;
         
         const profileName = appData.profileNames[profileKey] || `Perfil ${bankNum}`;
-        updateProfileCircleDisplay(circle, bankKey, profileName);
+        updateProfileCircleDisplay(rect, bankKey, profileName);
         
-        circle.addEventListener('click', () => handleProfileClick(bankKey, circle));
-        circle.addEventListener('contextmenu', (e) => {
+        rect.addEventListener('click', () => handleProfileClick(bankKey, rect));
+        rect.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            handleProfileRename(profileKey, circle);
+            handleProfileRename(profileKey, rect);
         });
-        profileCirclesContainer.appendChild(circle);
+        profileCirclesContainer.appendChild(rect);
     });
 
     const addButton = document.createElement('div');
     addButton.id = 'addBankButton';
-    addButton.className = 'profile-circle add-bank-button';
-    addButton.textContent = '+';
+    addButton.className = 'profile-rect add-bank-button';
+    addButton.innerHTML = `<span style="font-size:20px;line-height:1;">+</span>`;
     addButton.title = 'Adicionar novo banco de dados';
     addButton.addEventListener('click', handleAddBankClick);
     profileCirclesContainer.appendChild(addButton);
@@ -502,9 +511,8 @@ function handleProfileClick(bankKey, circleElementOrButton) {
             outputElement.textContent = `Todos os nomes do banco ${bankKey} foram gerados. Lista reiniciada.\nNenhum nome disponível após reinício.`;
             return;
         }
-        outputElement.textContent = `Todos os nomes do banco ${bankKey} foram gerados. Reiniciando a lista.\nPor favor, clique novamente para gerar.`;
-        saveAppData(); // Save the cleared set
-        return; // User must click again
+        outputElement.textContent = `Todos os nomes do banco ${bankKey} foram gerados. Reiniciando a lista.\nTente gerar novamente.`;
+        // No immediate generation after reset message, user should click again.
     }
     
     const randomIndexInAvailable = Math.floor(Math.random() * availableIndices.length);
@@ -514,7 +522,7 @@ function handleProfileClick(bankKey, circleElementOrButton) {
     currentGeneratedIndices.add(originalDbIndex);
     saveAppData(); 
 
-    const resultText = `Nome: ${person.name}\nCPF: ${person.cpf}\nNascimento: ${person.dob}`;
+    const resultText = `Nome: ${person.name}\nCPF: ${person.cpf}`;
     outputElement.textContent = resultText;
     copyToClipboard(resultText, circleElementOrButton.tagName === 'BUTTON' ? circleElementOrButton : null, `Copiado de ${bankKey}!`, 
         circleElementOrButton.tagName === 'BUTTON' ? 'Gerar Novo Nome do Banco Selecionado' : undefined);
@@ -542,29 +550,24 @@ function handleProfileRename(profileKey, circleElement) {
 // Original "Gerar e Copiar" button
 document.getElementById('generateButton').addEventListener('click', () => {
     const inputText = document.getElementById('inputText').value;
-    let processedNameLine = '';
-    let processedCpfLine = '';
-    let processedDobLine = '';
-
     const data = extractDataFromText(inputText);
 
-    if (data) {
-        processedNameLine = `Nome: ${formatName(data.name)}`;
-        processedCpfLine = `CPF: ${data.cpf}`;
-        processedDobLine = `Nascimento: ${data.dob}`;
-    }
-
     let resultText = '';
-    if (processedNameLine) resultText += processedNameLine;
-    if (processedCpfLine) resultText += (resultText ? '\n' : '') + processedCpfLine;
-    if (processedDobLine) resultText += (resultText ? '\n' : '') + processedDobLine;
+    if (data.name) {
+        resultText += `Nome: ${formatName(data.name)}`;
+    }
+    if (data.cpf) {
+        resultText += (resultText ? '\n' : '') + `CPF: ${data.cpf}`;
+    }
+    if (data.dobString) {
+        resultText += (resultText ? '\n' : '') + `Nascimento: ${data.dobString}`;
+    }
     
-    outputElement.textContent = resultText || "Nenhuma informação válida (Nome, CPF e Data de Nascimento) encontrada para extração rápida.";
-
+    outputElement.textContent = resultText;
     if (resultText) {
         copyToClipboard(resultText, document.getElementById('generateButton'), 'Copiado!', 'Gerar e Copiar Imediatamente');
     } else {
-        outputElement.textContent = "Nenhuma informação de Nome ou CPF encontrada para extração rápida.\nCertifique-se que o texto contém linhas como 'Nome: SEU NOME' e 'CPF: SEU CPF'.";
+        outputElement.textContent = "Nenhuma informação de Nome, CPF ou Nascimento encontrada para extração rápida.\nCertifique-se que o texto contém linhas como 'Nome: SEU NOME', 'CPF: SEU CPF' e/ou 'Nascimento: DD/MM/YYYY'.";
     }
 });
 
@@ -609,7 +612,7 @@ document.getElementById('saveToDbButton').addEventListener('click', () => {
         if (!trimmedBlock) return;
         const data = extractDataFromText(trimmedBlock);
 
-        if (data) {
+        if (data.name && data.cpf && data.yearOfBirth) {
             if (data.yearOfBirth >= 1974 && data.yearOfBirth <= 2004) {
                 const formattedName = formatName(data.name);
                 const existingEntry = currentBankDb.find(p => p.cpf === data.cpf);
@@ -620,7 +623,6 @@ document.getElementById('saveToDbButton').addEventListener('click', () => {
                     currentBankDb.push({
                         name: formattedName,
                         cpf: data.cpf,
-                        dob: data.dob,
                         yearOfBirth: data.yearOfBirth,
                     });
                     savedCount++;
@@ -631,7 +633,7 @@ document.getElementById('saveToDbButton').addEventListener('click', () => {
             }
         } else {
             const snippet = trimmedBlock.length > 60 ? trimmedBlock.substring(0, 60) + "..." : trimmedBlock;
-            errorMessages.push(`Não foi possível extrair dados válidos do trecho: "${snippet}". Verifique o formato.`);
+            errorMessages.push(`Não foi possível extrair dados válidos (Nome, CPF e Nascimento) do trecho: "${snippet}". Verifique o formato.`);
         }
     });
 
@@ -767,9 +769,35 @@ document.addEventListener('DOMContentLoaded', () => {
                   // setActiveBank then updates UI and saves.
     createProfileCircles(); 
     createBankSelectorButtons();
-    
-    // The active bank (and its UI indication) is handled by loadAppData -> setActiveBank.
-    // No need for explicit setActiveBank call here again unless loadAppData doesn't fully set UI.
-    // The createBankSelectorButtons might need to ensure the .active class is correctly set based on global activeBankKey.
-    // Let's ensure createBankSelectorButtons correctly reflects current activeBankKey. (Added logic in that function)
+
+    // Layout toggle buttons behavior
+    const desktopBtn = document.getElementById('desktopModeButton');
+    const mobileBtn = document.getElementById('mobileModeButton');
+
+    function setLayoutMode(mode) {
+        if (mode === 'desktop') {
+            profileCirclesContainer.classList.remove('mobile-mode');
+            profileCirclesContainer.classList.add('desktop-mode');
+            desktopBtn.classList.add('active');
+            desktopBtn.setAttribute('aria-pressed', 'true');
+            mobileBtn.classList.remove('active');
+            mobileBtn.setAttribute('aria-pressed', 'false');
+        } else {
+            profileCirclesContainer.classList.remove('desktop-mode');
+            profileCirclesContainer.classList.add('mobile-mode');
+            mobileBtn.classList.add('active');
+            mobileBtn.setAttribute('aria-pressed', 'true');
+            desktopBtn.classList.remove('active');
+            desktopBtn.setAttribute('aria-pressed', 'false');
+        }
+        // Save user's preferred layout in localStorage
+        localStorage.setItem('generator_layout_mode', mode);
+    }
+
+    // Restore saved layout mode or default to desktop
+    const savedMode = localStorage.getItem('generator_layout_mode') || 'desktop';
+    setLayoutMode(savedMode);
+
+    desktopBtn.addEventListener('click', () => setLayoutMode('desktop'));
+    mobileBtn.addEventListener('click', () => setLayoutMode('mobile'));
 });
